@@ -228,6 +228,14 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         ActiveLookScope.keyChanges += 1
         ActiveLookScope.dlog("keychange \(ActiveLookScope.keyChanges) key=\(window?.isKeyWindow ?? false)")
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
+        let dumpState = { [weak self] (when: String) in
+            guard let self else { return }
+            let keys = ["_subduedState", "_scrimState", "_adaptiveAppearance", "_interactionState", "style", "tintColor", "cornerRadius"]
+            let vals = keys.map { k in "\(k)=\(String(describing: self.value(forKey: k)).prefix(80))" }.joined(separator: " ")
+            ActiveLookScope.dlog("STATE \(when) key=\(self.window?.isKeyWindow ?? false) \(vals) layer=\(self.layer.map { String(describing: type(of: $0)) } ?? "nil") sub=\(self.subviews.map { "\(type(of: $0)) hidden=\($0.isHidden) alpha=\($0.alphaValue)" })")
+        }
+        dumpState("now")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dumpState("later") }
     }
 
     // Setting these re-renders the graph at once, outside any update above: the window backdrop's
