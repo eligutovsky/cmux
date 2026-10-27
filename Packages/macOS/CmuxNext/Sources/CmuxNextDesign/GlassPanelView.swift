@@ -448,6 +448,7 @@ enum ActiveLookScope {
 
     static var keyChanges = 0
     static var tags: [String] = []
+    static var fullDumps = 0
     static var lastLine = ""
     static var repeatCount = 0
     static func dlog(_ line: String) {
@@ -490,6 +491,10 @@ enum ActiveLookScope {
                     let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 24) })
                     if fr[0..<n].contains(where: { $0.map { UInt(bitPattern: $0) } == ms }) {
                         var extra = ""
+                        if tags.isEmpty, fullDumps < 3, Thread.callStackSymbols.contains(where: { $0.contains("LayoutPassGuard") }) {
+                            fullDumps += 1
+                            dlog("FULL\n" + Thread.callStackSymbols.joined(separator: "\n"))
+                        }
                         if tags.isEmpty {
                             extra = " | " + Thread.callStackSymbols.dropFirst(10).filter { $0.contains("cmux DEV") && !$0.contains("TR +") }.prefix(5).map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(70)) : l }.joined(separator: " < ")
                         }
