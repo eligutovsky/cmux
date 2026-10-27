@@ -225,6 +225,8 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         typealias Method = @convention(c) (NSView, Selector) -> Void
         let selector = NSSelectorFromString("_windowChangedKeyState")
         guard let implementation = Self.superImplementation(selector) else { return }
+        ActiveLookScope.keyChanges += 1
+        ActiveLookScope.dlog("keychange \(ActiveLookScope.keyChanges) key=\(window?.isKeyWindow ?? false)")
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
     }
 
@@ -441,6 +443,18 @@ enum ActiveLookScope {
         return count >= confirmations ? pair.first : nil
     }
 
+    static var keyChanges = 0
+    static var lastLine = ""
+    static var repeatCount = 0
+    static func dlog(_ line: String) {
+        if line == lastLine { repeatCount += 1; return }
+        let flushed = repeatCount > 0 ? "  (x\(repeatCount + 1))\n" : ""
+        lastLine = line; repeatCount = 0
+        let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag9.txt")
+        let data = Data((flushed + line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() } else { try? data.write(to: url) }
+    }
+
     private static func finishCalibration() {
         defer { pending.removeAll() }
         // An update with no calibration reads (no graph update) says nothing.
@@ -465,7 +479,19 @@ enum ActiveLookScope {
         { window in
             let answer = original(window, selector)
             guard pthread_main_np() != 0 else { return answer }
-            return MainActor.assumeIsolated { decide(window, answer: answer) }
+            return MainActor.assumeIsolated {
+                let result = decide(window, answer: answer)
+                if keyChanges > 0, String(describing: type(of: window)) == "ShellWindow" {
+                    var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 24)
+                    let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 24) })
+                    let ms = materialSite
+                    let isMat = fr[0..<n].contains { $0.map { UInt(bitPattern: $0) } == ms }
+                    let syms = Thread.callStackSymbols.dropFirst(8).filter { !$0.contains("ActiveLookScope") && !$0.contains("assumeIsolated") && !$0.contains("TR +") && !$0.contains("Sendable") }
+                    let sig = syms.prefix(4).map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(60)) : l }.joined(separator: " < ")
+                    dlog("R kc=\(keyChanges) mat=\(isMat) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result) | \(sig)")
+                }
+                return result
+            }
         }
     }
 
