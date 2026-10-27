@@ -112,10 +112,15 @@ export function AddProjectPanel({
       setQuery("");
       return;
     }
-    void Promise.resolve(onBrowse?.()).then((path) => {
-      if (path) onPick(path);
-      else if (path === undefined) onClose();
-    });
+    setError(undefined);
+    void Promise.resolve(onBrowse?.())
+      .then((path) => {
+        if (path) onPick(path);
+        else if (path === undefined) onClose();
+      })
+      .catch((failure: unknown) => {
+        setError(failure instanceof Error ? failure.message : String(failure));
+      });
   };
   const select = (id: string) => {
     const choice = choices.find((item) => item.id === id);
@@ -213,7 +218,10 @@ export function AddProjectPanel({
           ) : error ? (
             <>
               <span>{error}</span>
-              <button type="button" onClick={() => setRetry((value) => value + 1)}>
+              <button
+                type="button"
+                onClick={() => (host.list ? setRetry((value) => value + 1) : chooseFolder())}
+              >
                 {t("project.retry")}
               </button>
             </>
