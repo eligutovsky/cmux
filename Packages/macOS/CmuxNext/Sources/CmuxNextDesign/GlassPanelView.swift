@@ -225,6 +225,8 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         typealias Method = @convention(c) (NSView, Selector) -> Void
         let selector = NSSelectorFromString("_windowChangedKeyState")
         guard let implementation = Self.superImplementation(selector) else { return }
+        ActiveLookScope.keyChanges += 1
+        ActiveLookScope.dlog("keychange \(ActiveLookScope.keyChanges) key=\(window?.isKeyWindow ?? false)")
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
     }
 
@@ -332,6 +334,7 @@ enum ActiveLookScope {
 
     /// Runs `body`, a glass update for `window`, with that window's material read forced active.
     static func during(_ window: NSWindow?, _ body: () -> Void) {
+        tags.append("glass"); defer { tags.removeLast() }
         guard enter(window) else { return body() }
         defer { leave() }
         body()
@@ -383,6 +386,8 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
+        if pthread_main_np() != 0 { MainActor.assumeIsolated { tags.append(glassWindow(of: view) != nil ? "ourHost" : "plainHost") } }
+        defer { if pthread_main_np() != 0 { MainActor.assumeIsolated { _ = tags.popLast() } } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
         body()
         MainActor.assumeIsolated { leave() }
@@ -441,6 +446,19 @@ enum ActiveLookScope {
         return count >= confirmations ? pair.first : nil
     }
 
+    static var keyChanges = 0
+    static var tags: [String] = []
+    static var lastLine = ""
+    static var repeatCount = 0
+    static func dlog(_ line: String) {
+        if line == lastLine { repeatCount += 1; return }
+        let flushed = repeatCount > 0 ? "  (x\(repeatCount + 1))\n" : ""
+        lastLine = line; repeatCount = 0
+        let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag10.txt")
+        let data = Data((flushed + line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() } else { try? data.write(to: url) }
+    }
+
     private static func finishCalibration() {
         defer { pending.removeAll() }
         // An update with no calibration reads (no graph update) says nothing.
@@ -465,7 +483,21 @@ enum ActiveLookScope {
         { window in
             let answer = original(window, selector)
             guard pthread_main_np() != 0 else { return answer }
-            return MainActor.assumeIsolated { decide(window, answer: answer) }
+            return MainActor.assumeIsolated {
+                let result = decide(window, answer: answer)
+                if keyChanges > 0, String(describing: type(of: window)) == "ShellWindow", let ms = materialSite {
+                    var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 24)
+                    let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 24) })
+                    if fr[0..<n].contains(where: { $0.map { UInt(bitPattern: $0) } == ms }) {
+                        var extra = ""
+                        if tags.isEmpty {
+                            extra = " | " + Thread.callStackSymbols.dropFirst(10).filter { $0.contains("cmux DEV") && !$0.contains("TR +") }.prefix(5).map { l -> String in let p = l.split(separator: " ", omittingEmptySubsequences: true); return p.count > 3 ? String(p[3...].joined(separator: " ").prefix(70)) : l }.joined(separator: " < ")
+                        }
+                        dlog("M kc=\(keyChanges) tags=\(tags.suffix(3)) in=\(windows.last == ObjectIdentifier(window)) a=\(answer) -> \(result)\(extra)")
+                    }
+                }
+                return result
+            }
         }
     }
 
