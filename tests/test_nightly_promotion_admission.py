@@ -205,7 +205,7 @@ const readTreeMarker = async (sha) => {
   calls.markerReads.push(sha);
   const marker = (scenario.treeMarkers || {})[sha];
   if (marker === 'throw') throw new Error('getaddrinfo ENOTFOUND files.cmux.com');
-  return marker || { status: 200, body: { commit: sha, key: 'f'.repeat(40) } };
+  return marker || { status: 200, body: { commit: sha, key: 'f'.repeat(40), publishedBy: 'e'.repeat(40), markedBy: 'https://github.com/manaflow-ai/cmux/actions/runs/1' } };
 };
 let newest = null;
 const decision = scenario.newest
@@ -1176,7 +1176,10 @@ def test_g5_a_marker_read_failure_is_not_a_missing_tree() -> None:
     for marker in ({"status": 503}, {"status": 0, "error": "timeout"}, "throw",
                    {"status": 200, "error": "the body does not parse"},
                    {"status": 200, "body": {"commit": NEWER, "key": "f" * 40}},
-                   {"status": 200, "body": {"commit": SHA}}):
+                   {"status": 200, "body": {"commit": SHA}},
+                   {"status": 200, "body": {"commit": SHA, "key": "f" * 40}},
+                   {"status": 200, "body": {"commit": SHA, "key": "f" * 40, "publishedBy": "x", "markedBy": "u"}},
+                   {"status": 200, "body": {"commit": SHA, "key": "f" * 40, "publishedBy": "e" * 40, "markedBy": ""}}):
         case = scenario(treeMarkers={SHA: marker})
         del case["requireApproval"]
         out = run(case)

@@ -159,7 +159,7 @@ const runStep = async (script, env, runId, outputs) => {
 // G5's tree-commit marker (fetchTreeMarker's default fetch): every commit is ready.
 globalThis.fetch = async (url) => {
   const sha = String(url).match(/tree-commits\/([0-9a-f]{40})\.json/)[1];
-  return { status: 200, json: async () => ({ commit: sha, key: 'f'.repeat(40) }) };
+  return { status: 200, json: async () => ({ commit: sha, key: 'f'.repeat(40), publishedBy: 'e'.repeat(40), markedBy: 'https://github.com/manaflow-ai/cmux/actions/runs/1' }) };
 };
 // The admission retry sleeps between lookups; run it without waiting.
 global.setTimeout = (callback) => { callback(); return 0; };

@@ -154,8 +154,10 @@ export async function treeMarkerGate(readTreeMarker, sha) {
     return `tree marker read failed for ${sha} (${url}: ${marker?.error || `HTTP ${marker?.status}`}); nothing promoted. A read failure, not a missing tree: request again once files.cmux.com answers (${TREE_REQUEST_AGAIN})`;
   }
   const body = marker.body;
-  if (body?.commit !== sha || !/^[0-9a-f]{40}$/.test(body?.key || '')) {
-    return `tree marker read failed for ${sha} (${url}): it names commit ${body?.commit || 'none'} and key ${body?.key || 'none'}; nothing promoted`;
+  const hex40 = (v) => typeof v === 'string' && /^[0-9a-f]{40}$/.test(v);
+  if (body?.commit !== sha || !hex40(body?.key) || !hex40(body?.publishedBy)
+      || typeof body?.markedBy !== 'string' || !body.markedBy.trim()) {
+    return `tree marker read failed for ${sha} (${url}): it is not a complete marker of ${sha} (commit ${body?.commit || 'none'}, key ${body?.key || 'none'}, publishedBy ${body?.publishedBy || 'none'}, markedBy ${body?.markedBy ? 'set' : 'none'}); nothing promoted`;
   }
   return null;
 }
