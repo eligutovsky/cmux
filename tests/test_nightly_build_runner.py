@@ -130,18 +130,21 @@ class Workflow(unittest.TestCase):
                 self.assertIn(f"needs.{GUARDED[job]}.outputs.blacksmith", runs_on)
 
     def test_every_nightly_next_route_has_a_blacksmith_fallback(self) -> None:
-        # Owned only on attempt 1 and only when the picker saw it idle; anything else is Blacksmith.
+        # Owned only on attempt 1 and only when the picker saw it idle; anything else is Blacksmith,
+        # whatever vars.MACOS_RUNNER_26 holds (a hosted or owned value never routes around the pick).
         for job, pick in GUARDED.items():
             source = DOC["jobs"][job]["runs-on"].removeprefix("${{").removesuffix("}}")
-            for attempt, owned, blacksmith, owned_on in itertools.product(
-                    (1, 2, 3), ("", SIDE), ("", SMALL), ("1", "0")):
+            for attempt, owned, blacksmith, owned_on, variable in itertools.product(
+                    (1, 2, 3), ("", SIDE), ("", SMALL), ("1", "0"), ("macos-26", "macos-15", SIDE, LARGE, "")):
                 context = {"github.repository_owner": "manaflow-ai", "github.repository": "manaflow-ai/cmux",
                            "github.event_name": "push", "github.ref": "refs/heads/nightly-next",
                            "github.run_attempt": attempt, "vars.CI_PR_POOL_OWNED": owned_on,
                            "vars.CI_SIDE_LANE_RUNNER": SIDE, "vars.CI_NIGHTLY_NEXT_BUILD_RUNNER": DEV,
                            "vars.CI_SEED_TRUSTED_POOL": "glaeda-trusted-std-xcode-26.6",
+                           "vars.MACOS_RUNNER_26": variable,
                            f"needs.{pick}.outputs.owned": owned, f"needs.{pick}.outputs.blacksmith": blacksmith}
-                with self.subTest(job=job, attempt=attempt, owned=owned, blacksmith=blacksmith, owned_on=owned_on):
+                with self.subTest(job=job, attempt=attempt, owned=owned, blacksmith=blacksmith, owned_on=owned_on,
+                                  variable=variable):
                     label = evaluate(parse_expression(source), context)
                     if attempt == 1 and owned:
                         self.assertEqual(label, owned)
