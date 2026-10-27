@@ -226,6 +226,8 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         let selector = NSSelectorFromString("_windowChangedKeyState")
         guard let implementation = Self.superImplementation(selector) else { return }
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
+        ActiveLookScope.keyChanges += 1
+        ActiveLookScope.dlog("keychange \(ActiveLookScope.keyChanges) key=\(window?.isKeyWindow ?? false)")
     }
 
     // Setting these re-renders the graph at once, outside any update above: the window backdrop's
@@ -381,6 +383,8 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
+        if pthread_main_np() != 0 { MainActor.assumeIsolated { hostStack.append(String(describing: type(of: view.superview ?? view)) + (glassWindow(of: view) != nil ? "*" : "")) } }
+        defer { if pthread_main_np() != 0 { MainActor.assumeIsolated { _ = hostStack.popLast() } } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
         body()
         MainActor.assumeIsolated { leave() }
@@ -439,6 +443,15 @@ enum ActiveLookScope {
         return count >= confirmations ? pair.first : nil
     }
 
+    static var hostStack: [String] = []
+    static var keyChanges = 0
+    static var seen: [String: Int] = [:]
+    static func dlog(_ line: String) {
+        let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag8.txt")
+        let data = Data((line + "\n").utf8)
+        if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(data); try? h.close() } else { try? data.write(to: url) }
+    }
+
     private static func finishCalibration() {
         defer { pending.removeAll() }
         // An update with no calibration reads (no graph update) says nothing.
@@ -469,6 +482,21 @@ enum ActiveLookScope {
 
     private static func decide(_ window: NSWindow, answer: Bool) -> Bool {
         // Outside a glass update for this window, or a key window once calibrated: AppKit's answer.
+        if windows.last != ObjectIdentifier(window), !answer, keyChanges > 0, let ms = materialSite, String(describing: type(of: window)) == "ShellWindow" {
+            var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 16)
+            let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 16) })
+            if fr[0..<n].contains(where: { $0.map { UInt(bitPattern: $0) } == ms }) {
+                let host = hostStack.last ?? "NONE"
+                let syms = Thread.callStackSymbols
+                let sig = syms.dropFirst(10).prefix(40).map { l -> String in
+                    let parts = l.split(separator: " ", omittingEmptySubsequences: true)
+                    return parts.count > 3 ? parts[1] + ":" + parts[3...].joined(separator: " ").prefix(70) : l
+                }.filter { !$0.contains("ActiveLookScope") && !$0.contains("assumeIsolated") && !$0.contains("TR +") }
+                let key = host + " | " + sig.prefix(14).joined(separator: " < ")
+                seen[key, default: 0] += 1
+                if seen[key] == 1 { dlog("OUT kc=\(keyChanges) \(key)") }
+            }
+        }
         guard windows.last == ObjectIdentifier(window), materialSite == nil || !answer else { return answer }
         var frames = [UnsafeMutableRawPointer?](repeating: nil, count: depth)
         let count = Int(frames.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, Int32(depth)) })
