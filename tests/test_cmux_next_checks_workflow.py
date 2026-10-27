@@ -643,7 +643,7 @@ class PathRoutingStructure(unittest.TestCase):
             with self.subTest(job=job_id):
                 steps = jobs[job_id]["steps"]
                 names = [step.get("name") for step in steps]
-                download = steps[names.index("Download the web bundles this run's Linux job built")]
+                download = steps[names.index("Download the web bundles this run's bundle job built")]
                 self.assertEqual(download["id"], "web-bundle-artifact")
                 self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
                 self.assertEqual(download["with"]["name"], upload["with"]["name"])
@@ -1151,6 +1151,9 @@ class SupersededCommitIsNotRed(unittest.TestCase):
             name: job for name, job in self.jobs().items()
             if any("pin-cmux-tui.sh fetch" in step.get("run", "") for step in job.get("steps", []))
         }
+        # The landing compile's placement probes the tree itself (dev-landing-place).
+        landing = fetching.pop("dev-landing-compile")
+        self.assertIn("needs.dev-landing-place.outputs.tree_state == 'ready'", " ".join(landing["if"].split()))
         self.assertEqual(sorted(fetching), sorted(TREE_JOBS))
         for name, job in fetching.items():
             with self.subTest(job=name):
