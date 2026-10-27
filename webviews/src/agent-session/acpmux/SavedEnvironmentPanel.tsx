@@ -74,7 +74,15 @@ export function SavedEnvironmentPanel({
     };
   }, []);
   const ready = savedEnvironmentReady(draft) && !saving && !browsing;
-  const update = (change: Partial<SavedEnvironmentDraft>) => setDraft((current) => ({ ...current, ...change }));
+  const update = (change: Partial<SavedEnvironmentDraft>) => {
+    if (Object.prototype.hasOwnProperty.call(change, "folder")) {
+      browseRequest.current += 1;
+      setBrowsing(false);
+      setBrowseFailed(false);
+      setError(undefined);
+    }
+    setDraft((current) => ({ ...current, ...change }));
+  };
   const save = () => {
     if (!ready) return;
     setSaving(true);
@@ -99,7 +107,11 @@ export function SavedEnvironmentPanel({
     void Promise.resolve()
       .then(() => onBrowse())
       .then((folder) => {
-        if (browseRequest.current === id && folder) update({ folder });
+        if (browseRequest.current === id && folder) {
+          setDraft((current) => ({ ...current, folder }));
+          setBrowseFailed(false);
+          setError(undefined);
+        }
       })
       .catch((failure: unknown) => {
         if (browseRequest.current === id) {

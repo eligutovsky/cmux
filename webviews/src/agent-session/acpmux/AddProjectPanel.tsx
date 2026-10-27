@@ -83,6 +83,8 @@ export function AddProjectPanel({
   }, [host, requested, step, retry]);
 
   const back = () => {
+    browseRequest.current += 1;
+    setBrowsing(false);
     setStep(step === "directory" ? "source" : "environment");
     setQuery("");
     setError(undefined);
