@@ -291,6 +291,38 @@ mod tests {
         assert!(!copyable(0, 10) && !copyable(10, 0));
     }
 
+    /// A 2x1 PNG of `color` from `data`, with `palette` and `trns` when given.
+    fn two_pixels(color: png::ColorType, data: &[u8], palette: Option<(&[u8], &[u8])>) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut e = png::Encoder::new(&mut out, 2, 1);
+        e.set_color(color);
+        e.set_depth(png::BitDepth::Eight);
+        if let Some((plte, trns)) = palette {
+            e.set_palette(plte.to_vec());
+            e.set_trns(trns.to_vec());
+        }
+        e.write_header().unwrap().write_image_data(data).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_transparent_pixel_does_not_tint_the_opaque_one_it_is_averaged_with() {
+        // Opaque red and fully transparent blue: red, half covered (not translucent purple).
+        let rgba = two_pixels(png::ColorType::Rgba, &[255, 0, 0, 255, 0, 0, 255, 0], None);
+        // White and transparent black, as grey with alpha.
+        let grey = two_pixels(png::ColorType::GrayscaleAlpha, &[255, 255, 0, 0], None);
+        // The same red and blue from a palette whose blue is transparent (tRNS).
+        let plte: &[u8] = &[255, 0, 0, 0, 0, 255];
+        let indexed = two_pixels(png::ColorType::Indexed, &[0, 1], Some((plte, &[255, 0])));
+        for (png_bytes, want) in
+            [(rgba, [255, 0, 0, 127]), (grey, [255, 255, 255, 127]), (indexed, [255, 0, 0, 127])]
+        {
+            let (bytes, w, h) = downscale(std::io::Cursor::new(png_bytes), 1).unwrap();
+            assert_eq!((w, h), (1, 1));
+            assert_eq!(pixels(&bytes).2, want);
+        }
+    }
+
     #[test]
     fn a_png_within_the_edge_is_never_scaled_up() {
         let (_, w, h) = downscale(std::io::Cursor::new(halves(640, 480)), 1568).unwrap();

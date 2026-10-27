@@ -551,4 +551,12 @@ async fn a_large_screenshot_reaches_the_model_as_a_sized_copy_next_to_its_origin
     let messages = c.user_messages(&session).await;
     let logged = serde_json::to_string(&messages).unwrap();
     assert!(!logged.contains("scaled to"), "{logged}");
+    // Nor any record of the log, what was written to the agent too: the copy's base64 is left out.
+    let all = json!({"sessionId": session, "limit": 100_000, "maxBytes": 1u64 << 32});
+    let page = c.call("_acpmux/events", all).await;
+    let records = page["result"]["events"].as_array().unwrap_or_else(|| panic!("{page}"));
+    assert!(records.iter().any(|r| r["dir"] == "out"), "{page}");
+    let copy = b64(&sent[0]);
+    let logged = serde_json::to_string(records).unwrap();
+    assert!(!logged.contains(&copy[200..300]), "the copy's base64 was logged");
 }
