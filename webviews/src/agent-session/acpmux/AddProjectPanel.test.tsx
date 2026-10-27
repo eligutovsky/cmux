@@ -60,13 +60,17 @@ afterEach(async () => {
 
 test("keeps the native chooser panel open when browse rejects", async () => {
   const container = installDom();
+  let attempts = 0;
   const close = () => {};
   await act(async () => {
     root = createRoot(container);
     root.render(
       <AddProjectPanel
         host={{}}
-        onBrowse={() => Promise.reject(new Error("Folder access was denied."))}
+        onBrowse={() => {
+          attempts += 1;
+          return Promise.reject(new Error("Folder access was denied."));
+        }}
         onPick={() => {}}
         onClose={close}
       />,
@@ -85,4 +89,12 @@ test("keeps the native chooser panel open when browse rejects", async () => {
   expect(container.querySelector('[data-add-project-step="source"]')).toBeTruthy();
   expect(container.textContent).toContain("Folder access was denied.");
   expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Retry")).toBe(true);
+  expect(attempts).toBe(1);
+  const retry = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Retry",
+  );
+  expect(retry).toBeTruthy();
+  await act(async () => retry!.click());
+  await act(async () => Promise.resolve());
+  expect(attempts).toBe(2);
 });

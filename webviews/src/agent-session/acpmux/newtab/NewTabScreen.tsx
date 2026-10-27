@@ -12,7 +12,7 @@ import { OnNewTab } from "../newTabComposer";
 import type { Project } from "../ProjectChooser";
 import { firstProject, isAgentHome, mostRecentProject, projectLabel } from "../sessionList";
 import { WorktreeFailure } from "../startFolder";
-import { BrowseFailure } from "../BrowseFailure";
+import { BrowseFailure, browseFailureMessage } from "../BrowseFailure";
 import type { SavedEnvironment, SavedEnvironmentHost } from "../environments";
 import { SavedEnvironmentPanel } from "../SavedEnvironmentPanel";
 import { useSavedEnvironments } from "./savedEnvironments";
@@ -976,6 +976,7 @@ export function NewTabScreen(props: Props) {
   const projectChoice = useRef(0);
   const pickProject = (cwd?: string) => {
     projectChoice.current += 1;
+    setBrowseError(undefined);
     // A folder picked anywhere on the page (a widget card's project) replaces a saved environment.
     saved.pick(undefined);
     touch();
@@ -1041,13 +1042,15 @@ export function NewTabScreen(props: Props) {
       : undefined;
   const browseProject = props.onBrowseProject
     ? () => {
+        const choice = ++projectChoice.current;
         setBrowseError(undefined);
-        void props.onBrowseProject?.()
+        void Promise.resolve()
+          .then(() => props.onBrowseProject?.())
           .then((cwd) => {
-            if (cwd) pickProject(cwd);
+            if (choice === projectChoice.current && cwd) pickProject(cwd);
           })
           .catch((error: unknown) => {
-            setBrowseError((error instanceof Error && error.message) || String(error));
+            if (choice === projectChoice.current) setBrowseError(browseFailureMessage(error));
           });
       }
     : undefined;

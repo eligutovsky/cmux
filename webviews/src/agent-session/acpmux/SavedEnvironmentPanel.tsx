@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { KeyboardScope } from "../../ui/KeyboardScope";
 import { Menu, MenuButton, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from "../../ui/Menu";
+import { browseFailureMessage } from "./BrowseFailure";
 import { ChevronIcon } from "./ComposerPickers";
 import {
   SAVED_ENVIRONMENT_NAME_LIMIT,
@@ -65,7 +66,13 @@ export function SavedEnvironmentPanel({
   const [browsing, setBrowsing] = useState(false);
   const [browseFailed, setBrowseFailed] = useState(false);
   const name = useRef<HTMLInputElement>(null);
-  useEffect(() => name.current?.focus(), []);
+  const browseRequest = useRef(0);
+  useEffect(() => {
+    name.current?.focus();
+    return () => {
+      browseRequest.current += 1;
+    };
+  }, []);
   const ready = savedEnvironmentReady(draft) && !saving && !browsing;
   const update = (change: Partial<SavedEnvironmentDraft>) => setDraft((current) => ({ ...current, ...change }));
   const save = () => {
@@ -85,18 +92,24 @@ export function SavedEnvironmentPanel({
   };
   const browse = () => {
     if (!onBrowse || browsing) return;
+    const id = ++browseRequest.current;
     setBrowsing(true);
     setBrowseFailed(false);
     setError(undefined);
-    void onBrowse()
+    void Promise.resolve()
+      .then(() => onBrowse())
       .then((folder) => {
-        if (folder) update({ folder });
+        if (browseRequest.current === id && folder) update({ folder });
       })
       .catch((failure: unknown) => {
-        setBrowseFailed(true);
-        setError(failure instanceof Error ? failure.message : String(failure));
+        if (browseRequest.current === id) {
+          setBrowseFailed(true);
+          setError(browseFailureMessage(failure));
+        }
       })
-      .finally(() => setBrowsing(false));
+      .finally(() => {
+        if (browseRequest.current === id) setBrowsing(false);
+      });
   };
   const command = (event: KeyboardEvent<HTMLDivElement>) => {
     // A menu or folder popover the panel opened draws elsewhere on the page and keeps its own keys.
@@ -141,12 +154,17 @@ export function SavedEnvironmentPanel({
               aria-pressed={draft.kind === kind}
               onClick={() => {
                 // Another machine's folders are its own: a switch starts with none.
-                if (kind !== draft.kind)
+                if (kind !== draft.kind) {
+                  browseRequest.current += 1;
+                  setBrowsing(false);
+                  setBrowseFailed(false);
+                  setError(undefined);
                   setDraft(({ id: kept, name: named }) => ({
                     ...(kept ? { id: kept } : {}),
                     name: named,
                     kind,
                   }));
+                }
               }}
             >
               {kind === "local" ? t("composer.envLocal") : t("composer.envSSH")}
@@ -229,7 +247,7 @@ export function SavedEnvironmentPanel({
           <output className="acpmux-env-error" role={error ? "alert" : undefined}>
             {error}
           </output>
-          {browseFailed && (
+          {browseFailed && !ssh && (
             <button type="button" className="acpmux-env-button" onClick={browse} disabled={browsing}>
               {t("project.retry")}
             </button>

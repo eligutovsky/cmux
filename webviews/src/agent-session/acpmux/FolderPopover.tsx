@@ -125,7 +125,7 @@ export function FolderPopover({
   const submit = (value: string) => {
     const action = actions.find((candidate) => candidate.value === value);
     close();
-    if (action) void Promise.resolve(action.run()).catch(() => undefined);
+    if (action) void Promise.resolve().then(() => action.run()).catch(() => undefined);
     else if (value && value !== current && (shown.has(value) || value === typedPath)) onPick(value);
   };
   const row = (value: string) => {

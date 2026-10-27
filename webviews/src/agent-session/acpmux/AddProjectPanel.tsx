@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Combobox } from "../../ui/Combobox";
 import { Dialog } from "../../ui/Dialog";
 import { KeyboardScope } from "../../ui/KeyboardScope";
+import { browseFailureMessage } from "./BrowseFailure";
 import { useT } from "./i18n";
 import {
   directoryName,
@@ -37,11 +38,19 @@ export function AddProjectPanel({
   const [requested, setRequested] = useState("~");
   const [directory, setDirectory] = useState<ProjectDirectory>();
   const [loading, setLoading] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState<string>();
   const [revealError, setRevealError] = useState<string>();
   const [retry, setRetry] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const request = useRef(0);
+  const browseRequest = useRef(0);
+  useEffect(
+    () => () => {
+      browseRequest.current += 1;
+    },
+    [],
+  );
   useEffect(() => {
     input.current?.focus();
   }, [step, directory?.path]);
@@ -112,14 +121,22 @@ export function AddProjectPanel({
       setQuery("");
       return;
     }
+    if (browsing) return;
+    const id = ++browseRequest.current;
+    setBrowsing(true);
     setError(undefined);
-    void Promise.resolve(onBrowse?.())
+    void Promise.resolve()
+      .then(() => onBrowse?.())
       .then((path) => {
+        if (browseRequest.current !== id) return;
         if (path) onPick(path);
         else if (path === undefined) onClose();
       })
       .catch((failure: unknown) => {
-        setError(failure instanceof Error ? failure.message : String(failure));
+        if (browseRequest.current === id) setError(browseFailureMessage(failure));
+      })
+      .finally(() => {
+        if (browseRequest.current === id) setBrowsing(false);
       });
   };
   const select = (id: string) => {
@@ -213,13 +230,14 @@ export function AddProjectPanel({
           inline
         />
         <output className="acpmux-add-project-status" role={error || revealError ? "alert" : undefined}>
-          {loading ? (
+          {loading || browsing ? (
             t("project.loading")
           ) : error ? (
             <>
               <span>{error}</span>
               <button
                 type="button"
+                disabled={browsing}
                 onClick={() => (host.list ? setRetry((value) => value + 1) : chooseFolder())}
               >
                 {t("project.retry")}

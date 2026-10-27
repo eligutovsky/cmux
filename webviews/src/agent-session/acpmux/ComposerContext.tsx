@@ -193,9 +193,12 @@ export function ComposerContext({
   // A started chat's Choose folder…: the host's folder panel, then a new chat there.
   const browseNewChat = onBrowseFolder
     ? () => {
-        void onBrowseFolder().then((cwd) => {
-          if (cwd) onNewChat?.(cwd);
-        });
+        void Promise.resolve()
+          .then(() => onBrowseFolder())
+          .then((cwd) => {
+            if (cwd) onNewChat?.(cwd);
+          })
+          .catch(() => undefined);
       }
     : undefined;
   const pickComputer = (id: string) => {

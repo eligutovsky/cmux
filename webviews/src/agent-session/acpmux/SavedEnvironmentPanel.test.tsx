@@ -104,4 +104,11 @@ test("keeps a saved environment usable when folder browse rejects", async () => 
   expect(save.disabled).toBe(true);
   await act(async () => rejectBrowse!(new Error("Folder access was denied again.")));
   expect(container.querySelector('[role="alert"]')?.textContent).toContain("Folder access was denied again.");
+
+  await act(async () =>
+    [...container.querySelectorAll<HTMLButtonElement>(".acpmux-env-tab")]
+      .find((button) => button.textContent === "SSH")
+      ?.click(),
+  );
+  expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Retry")).toBe(false);
 });
