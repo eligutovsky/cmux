@@ -3359,7 +3359,8 @@ jobs:
     # Push runs build in parallel, so two failed runs can report at once: one
     # reporter at a time keeps the "find or open the one issue" step from
     # opening two. It builds and publishes nothing; a replaced pending report
-    # is an older failure the newer report covers.
+    # is an older failure the newer report covers. A close never takes an
+    # incident a newer commit reported (scripts/ci/nightly_failure_issue.mjs).
     concurrency:
       group: nightly-failure-report-${{ needs.decide.outputs.release_tag }}
       cancel-in-progress: false
@@ -3414,6 +3415,13 @@ jobs:
       contents: read
       issues: write
     steps:
+      - name: Checkout the failure-issue helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci/nightly_failure_issue.mjs
+          sparse-checkout-cone-mode: false
       - name: Close the nightly failure issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
@@ -3425,7 +3433,10 @@ jobs:
             const { owner, repo } = context.repo;
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
             const open = await github.rest.issues.listForRepo({ owner, repo, labels: `${process.env.CHANNEL}-failure`, state: 'open', per_page: 10 });
+            const { covers } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci/nightly_failure_issue.mjs`);
             for (const issue of open.data) {
+              // Push runs build in parallel: an incident a newer commit reported stays open.
+              if (!(await covers({ github, owner, repo, issue, sha: process.env.HEAD_SHA, core }))) continue;
               await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body: `${process.env.CHANNEL_APP_NAME} publish succeeded again on ${process.env.HEAD_SHA}: ${runUrl}` });
               await github.rest.issues.update({ owner, repo, issue_number: issue.number, state: 'closed' });
             }
