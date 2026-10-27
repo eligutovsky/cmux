@@ -4,7 +4,7 @@ import { errorMessage } from "./transportErrors";
 /// Native folder chooser failures use a transport code when one is available. Keep the shared
 /// fallback localized and useful when a host gives us no displayable reason.
 export function browseFailureMessage(error: unknown): string {
-  return errorMessage(error).trim() || translate("picker.unavailable");
+  return errorMessage(error).trim() || translate("project.unavailable");
 }
 
 /// A native folder chooser can fail after its menu has closed. Keep the start surface mounted and
