@@ -235,6 +235,17 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
             ActiveLookScope.dlog("STATE \(when) key=\(self.window?.isKeyWindow ?? false) \(vals) layer=\(self.layer.map { String(describing: type(of: $0)) } ?? "nil") sub=\(self.subviews.map { "\(type(of: $0)) hidden=\($0.isHidden) alpha=\($0.alphaValue)" })")
         }
         dumpState("now")
+        let refresh = { [weak self] (when: String) in
+            guard let self else { return }
+            ActiveLookScope.dlog("REFRESH \(when)")
+            ActiveLookScope.during(self.window) {
+                let tint = super.tintColor
+                super.tintColor = nil
+                super.tintColor = tint
+            }
+        }
+        refresh("sync")
+        DispatchQueue.main.async { refresh("async") }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dumpState("later") }
     }
 
