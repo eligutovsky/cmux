@@ -716,3 +716,38 @@ async fn a_fenced_line_to_a_closed_stdin_settles() {
     wait_dead(lock).await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Review 85 of #23322: a host killed while it still writes a fenced answer (no `Exit`, no
+/// receipt) settles that answer once its death is proven, so nothing waits on it forever.
+#[tokio::test]
+async fn a_fenced_answer_settles_once_its_host_is_killed() {
+    let dir = scratch("fenced-killed");
+    let record = link::spawn(&launcher(), &slow_reader(&dir, "s-fenced-killed")).await.unwrap();
+    let lock = live_lock(&dir, &record);
+    let (inbound, _inbound) = tokio::sync::mpsc::channel(64);
+    let tap: acpmux::agent::Tap = std::sync::Arc::new(|_, _, _| true);
+    let attached = acpmux::agent::ChildAgent::attach_hosted(
+        "fake",
+        record.clone(),
+        0,
+        Vec::new(),
+        inbound,
+        tap,
+    )
+    .await
+    .unwrap();
+    let acpmux::agent::Attached::Ready(agent, ..) = attached else {
+        panic!("the host refused its controller")
+    };
+    let fence = acpmux::agent::Fence::default();
+    let answer = Ok(json!({"text": "x".repeat(1 << 20)}));
+    agent.respond_fenced(json!(1), answer, Some(&fence)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // SAFETY: the host this test spawned; its live lock is held, so the pid is its own.
+    unsafe { libc::kill(record.host_pid as i32, libc::SIGKILL) };
+    wait_dead(lock).await;
+    tokio::time::timeout(Duration::from_secs(15), fence.settled())
+        .await
+        .expect("a fenced answer its killed host never wrote settles");
+    let _ = std::fs::remove_dir_all(&dir);
+}
