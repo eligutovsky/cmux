@@ -238,11 +238,7 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         let refresh = { [weak self] (when: String) in
             guard let self else { return }
             ActiveLookScope.dlog("REFRESH \(when)")
-            ActiveLookScope.during(self.window) {
-                let tint = super.tintColor
-                super.tintColor = nil
-                super.tintColor = tint
-            }
+            self.refreshTint()
         }
         refresh("sync")
         DispatchQueue.main.async { refresh("async") }
@@ -277,6 +273,14 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         let selector = NSSelectorFromString("_viewDidChangeAppearance:")
         guard let implementation = Self.superImplementation(selector) else { return }
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector, previous) }
+    }
+
+    func refreshTint() {
+        ActiveLookScope.during(window) {
+            let tint = super.tintColor
+            super.tintColor = nil
+            super.tintColor = tint
+        }
     }
 
     override func didAddSubview(_ subview: NSView) {
