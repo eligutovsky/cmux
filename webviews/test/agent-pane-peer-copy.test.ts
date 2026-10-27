@@ -102,6 +102,8 @@ class Daemon {
   failAttach = 0;
   /// Live records sent while the chat left is detached (before the attach is asked).
   beforeDetach: ReturnType<typeof record>[] = [];
+  /// The row's status while the machine is up, when not idle.
+  status: string | undefined;
   /// Another chat, on this Mac, listed beside the peer chat (a tab that switches from it).
   other = false;
   /// The session's `createdAt` a row announces while the attach is out (the machine recreated it),
@@ -167,7 +169,7 @@ class Daemon {
       cwd: "/home/dev/project",
       title: "Lane on huge-blue",
       harness: "claude",
-      status: this.down ? "unreachable" : "idle",
+      status: this.down ? "unreachable" : (this.status ?? "idle"),
       turnCount: 1,
       updatedAt: START,
       createdAt: this.createdAt,
@@ -299,6 +301,15 @@ class Daemon {
           lastSeq: this.lastSeqAfter ?? this.log.at(-1)?.seq ?? 0,
           ...(this.pageThrough !== undefined ? { pageThrough: this.pageThrough } : {}),
         },
+      });
+    }
+    if (message.method === "_acpmux/events" && p.beforeSeq !== undefined) {
+      // An older page: the newest records before `beforeSeq`, as many as the limit takes.
+      const before = Number(p.beforeSeq);
+      const older = this.log.filter((r) => r.seq < before);
+      const events = older.slice(-Number(p.limit ?? 400));
+      return this.reply(message.id, {
+        result: { events, hasMore: events.length < older.length, lastSeq: this.log.at(-1)?.seq ?? 0 },
       });
     }
     if (message.method === "_acpmux/events") {
@@ -1275,4 +1286,107 @@ test("a chat read ahead while its row named another session is not kept", async 
   daemon.release("_acpmux/events");
   await flush();
   expect(keptTail(SESSION)).toBeUndefined();
+});
+
+test("an attached chat whose machine recreates the session reads the new one instead of keeping the old rows", async () => {
+  const daemon = new Daemon();
+  daemon.down = false;
+  daemon.log = turn(1, 5, "old");
+  const tab = open(daemon);
+  live.push(await tab.client);
+  await flush();
+  expect(text(tab.last())).toContain("old 5.");
+  // Nothing is out: the machine recreates the session, and its row says so.
+  daemon.createdAt = 200;
+  daemon.log = turn(1, 3, "new");
+  daemon.announce();
+  await flush();
+  const shown = text(tab.last());
+  expect(shown).toContain("new 3.");
+  expect(shown).not.toContain("old ");
+});
+
+test("an attached chat whose session moves to another machine reads it from that machine", async () => {
+  const daemon = new Daemon();
+  daemon.down = false;
+  daemon.log = turn(1, 5, "here");
+  const tab = open(daemon);
+  live.push(await tab.client);
+  await flush();
+  expect(text(tab.last())).toContain("here 5.");
+  daemon.peer = "cloud-vm";
+  daemon.log = turn(1, 2, "vm");
+  daemon.announce();
+  await flush();
+  const shown = text(tab.last());
+  expect(shown).toContain("vm 2.");
+  expect(shown).not.toContain("here ");
+});
+
+test("an attached chat whose row changes only its status keeps its rows and is not read again", async () => {
+  const daemon = new Daemon();
+  daemon.down = false;
+  daemon.log = turn(1, 5, "same");
+  const tab = open(daemon);
+  live.push(await tab.client);
+  await flush();
+  const attaches = daemon.asked.filter((message) => message.method === "_acpmux/attach").length;
+  // The chat starts a turn and ends it: the row changes its status and when it was updated.
+  daemon.status = "running";
+  daemon.announce();
+  await flush();
+  daemon.status = undefined;
+  daemon.announce();
+  await flush();
+  expect(daemon.asked.filter((message) => message.method === "_acpmux/attach").length).toBe(attaches);
+  expect(text(tab.last())).toContain("same 5.");
+});
+
+test("an attached chat whose row names another session and then this one again ends on this one, read a bounded number of times", async () => {
+  const daemon = new Daemon();
+  daemon.down = false;
+  daemon.log = turn(1, 5, "first");
+  const tab = open(daemon);
+  live.push(await tab.client);
+  await flush();
+  const attaches = () => daemon.asked.filter((message) => message.method === "_acpmux/attach").length;
+  const before = attaches();
+  // A row of another session, then a late one of this session again, back to back.
+  daemon.createdAt = 200;
+  daemon.announce();
+  daemon.createdAt = 100;
+  daemon.announce();
+  await flush();
+  expect(text(tab.last())).toContain("first 5.");
+  expect(attaches() - before).toBeLessThanOrEqual(3);
+});
+
+test("an older page read of the session before it was recreated is not drawn above the new one", async () => {
+  const daemon = new Daemon();
+  daemon.down = false;
+  daemon.log = turn(1, 8, "old");
+  const tab = open(daemon);
+  const client = await tab.client;
+  live.push(client);
+  await flush();
+  // The attach drew the newest page (6 to 8); the reader scrolls up and the older page is held.
+  expect(text(tab.last())).toContain("old 8.");
+  daemon.hold.add("_acpmux/events");
+  const older = client.loadOlder().catch(() => undefined);
+  await flush();
+  // The machine recreates the session while that read is out, and the new one is attached.
+  daemon.createdAt = 200;
+  daemon.log = turn(1, 2, "new");
+  daemon.announce();
+  await flush();
+  expect(text(tab.last())).toContain("new 2.");
+  // The old session's older page lands now.
+  daemon.log = turn(1, 8, "old");
+  daemon.hold.delete("_acpmux/events");
+  daemon.release("_acpmux/events");
+  await older;
+  await flush();
+  const shown = text(tab.last());
+  expect(shown).toContain("new 2.");
+  expect(shown).not.toContain("old ");
 });
