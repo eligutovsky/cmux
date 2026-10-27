@@ -212,7 +212,7 @@ export function AddProjectPanel({
           }}
           inline
         />
-        <output className="acpmux-add-project-status">
+        <output className="acpmux-add-project-status" role={error || revealError ? "alert" : undefined}>
           {loading ? (
             t("project.loading")
           ) : error ? (
