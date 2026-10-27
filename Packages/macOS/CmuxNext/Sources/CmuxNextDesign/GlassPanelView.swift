@@ -226,6 +226,7 @@ final class ActiveLookGlassEffectView: NSGlassEffectView {
         let selector = NSSelectorFromString("_windowChangedKeyState")
         guard let implementation = Self.superImplementation(selector) else { return }
         ActiveLookScope.during(window) { unsafeBitCast(implementation, to: Method.self)(self, selector) }
+        ActiveLookScope.keyChanges += 1
         ActiveLookScope.dlog("keychange key=\(window?.isKeyWindow ?? false) subviews=\(subviews.map { NSStringFromClass(type(of: $0)) })"); ActiveLookScope.dumpStats()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { ActiveLookScope.dumpStats() }
     }
@@ -354,7 +355,8 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
-        if pthread_main_np() != 0 { MainActor.assumeIsolated { chainLog(view) } }
+        if pthread_main_np() != 0 { MainActor.assumeIsolated { chainLog(view); hostStack.append(String(describing: type(of: view.superview ?? view)) + (glassWindow(of: view) != nil ? "*" : "")) } }
+        defer { if pthread_main_np() != 0 { MainActor.assumeIsolated { _ = hostStack.popLast() } } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
         body()
         MainActor.assumeIsolated { leave() }
@@ -416,6 +418,8 @@ enum ActiveLookScope {
     static var stats: [String: Int] = [:]
     static var outLogged = 0
     static var chains: Set<String> = []
+    static var hostStack: [String] = []
+    static var keyChanges = 0
     @available(macOS 26.0, *) static func chainLog(_ view: NSView) {
         var parts: [String] = []
         var v: NSView? = view
@@ -465,8 +469,10 @@ enum ActiveLookScope {
             var fr = [UnsafeMutableRawPointer?](repeating: nil, count: 16)
             let n = Int(fr.withUnsafeMutableBufferPointer { backtrace($0.baseAddress, 16) })
             if fr[0..<n].contains(where: { $0.map { UInt(bitPattern: $0) } == ms }) {
+                if keyChanges > 0 { dlog("T kc=\(keyChanges) OUT host=\(hostStack.last ?? "NONE")") }
+                if hostStack.isEmpty, outLogged < 20 { outLogged += 1; dlog("NOHOST\n" + Thread.callStackSymbols.prefix(70).joined(separator: "\n")) }
                 stats["OUT-material scope=\(windows.count)", default: 0] += 1
-                if outLogged < 6 { outLogged += 1; dlog("OUT scope=\(windows.count)\n" + Thread.callStackSymbols.prefix(90).joined(separator: "\n")) }
+                if false { dlog("OUT scope=\(windows.count)\n" + Thread.callStackSymbols.prefix(90).joined(separator: "\n")) }
             }
         }
         guard windows.last == ObjectIdentifier(window), materialSite == nil || !answer else { return answer }
@@ -476,7 +482,7 @@ enum ActiveLookScope {
         guard let reader = (0..<count).first(where: { kind(of: frames[$0]) == .appKit }), reader + 1 < count,
               frames[(reader + 1)..<count].contains(where: { kind(of: $0) == .swiftUI }),
               let site = frames[reader].map({ UInt(bitPattern: $0) }) else { return answer }
-        if let materialSite { stats["forced=\(site == materialSite)", default: 0] += 1; return site == materialSite }
+        if let materialSite { stats["forced=\(site == materialSite)", default: 0] += 1; if keyChanges > 0, site == materialSite { dlog("T kc=\(keyChanges) FORCED host=\(hostStack.last ?? "glass-own")") }; return site == materialSite }
         if let caller = frames[reader + 1].map({ UInt(bitPattern: $0) }) { pending.append(Read(site: site, caller: caller)) }
         return answer
     }
