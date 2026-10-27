@@ -802,7 +802,7 @@ impl Hub {
 
     /// A permission prompt the previous daemon showed: keep the same id so a
     /// client answers it as before, and answer the agent's original request.
-    fn reregister_permission(
+    pub(super) fn reregister_permission(
         self: &Arc<Self>,
         session: &Arc<Session>,
         child: &Arc<ChildAgent>,

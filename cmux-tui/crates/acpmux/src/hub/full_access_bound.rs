@@ -1084,6 +1084,60 @@ mod tests {
         assert!(asked.is_ok(), "a cut answer left its agent waiting on a question nobody is asked");
     }
 
+    /// Review 86 of #23322: a family prompt that fails before its write (its PDF attachment has
+    /// no folder to go to) settles its fence, so the next off push does not wait on it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_family_prompt_that_fails_before_its_write_holds_no_push() {
+        let (hub, parent, child) = approve_all_parent().await;
+        let dir = std::env::temp_dir().join(format!("hbf-pdf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file where the attachment folder goes.
+        std::fs::write(dir.join(".cmux"), "").unwrap();
+        child.meta.lock().unwrap().cwd = dir.clone();
+        let pdf = vec![json!({"type": "document", "name": "a.pdf", "data": "JVBERi0="})];
+        let sent = hub.send_family_prompt(&parent, &child, pdf, None, false, false, None, None);
+        let _ = tokio::time::timeout(WAIT, sent).await;
+        assert_eq!(logged(&hub, &child, &["turn_end", "turn_error"]).await, "turn_error");
+        let started = std::time::Instant::now();
+        tokio::time::timeout(WAIT, push_off(&hub)).await.expect("the push returns").unwrap();
+        let took = started.elapsed();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            took < std::time::Duration::from_millis(500),
+            "an off push waited {took:?} on a prompt that failed before its write"
+        );
+    }
+
+    /// Review 86 of #23322: a question asked again after a restart (`reregister_permission`)
+    /// whose ancestor's answer an off push cut is not asked again once a stop cancelled it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_cut_answer_to_a_cancelled_question_is_not_asked_again() {
+        let (hub, parent, child) = approve_all_parent().await;
+        let (id, asking) = ask_pick(&hub, &child).await;
+        let request = child.permissions.lock().unwrap().pending[&id].request.clone();
+        let agent = hub.child_for(&child).await.expect("a running agent");
+        let again = "asked-again".to_owned();
+        hub.reregister_permission(&child, &agent, json!(9999), again.clone(), request);
+        let (arrived, release) = pause_input(&hub, &child, "\"id\":9999").await;
+        let answer = {
+            let (hub, parent, child, again) =
+                (hub.clone(), parent.clone(), child.clone(), again.clone());
+            tokio::spawn(async move {
+                hub.ancestor_answer(&parent, &child, &again, json!({"Pick?": "A"})).await
+            })
+        };
+        tokio::time::timeout(WAIT, arrived).await.expect("the answer is queued").unwrap();
+        hub.cancel_pending_permissions(&child);
+        tokio::time::timeout(WAIT, push_off(&hub)).await.expect("the push returns").unwrap();
+        let _ = release.send(());
+        let _ = answer.await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let reasked = child.permissions.lock().unwrap().pending.contains_key(&again);
+        asking.abort();
+        assert!(!reasked, "a question a stop cancelled was asked again");
+    }
+
     /// Review 40 of #23322: a family message whose agent hit its limit after the off push is
     /// checked again before it is resent to the fallback, and refused.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
