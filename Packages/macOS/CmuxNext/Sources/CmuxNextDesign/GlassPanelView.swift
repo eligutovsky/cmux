@@ -416,7 +416,7 @@ enum ActiveLookScope {
     static var stats: [String: Int] = [:]
     static var outLogged = 0
     static var chains: Set<String> = []
-    static func chainLog(_ view: NSView) {
+    @available(macOS 26.0, *) static func chainLog(_ view: NSView) {
         var parts: [String] = []
         var v: NSView? = view
         while let cur = v { parts.append("\(NSStringFromClass(type(of: cur)).suffix(60))\((cur as? NSGlassEffectView).map { " [cv=\($0.contentView.map { NSStringFromClass(type(of: $0)) } ?? "nil")]" } ?? "")"); v = cur.superview }
