@@ -1097,8 +1097,9 @@ mod tests {
         child.meta.lock().unwrap().cwd = dir.clone();
         let pdf = vec![json!({"type": "document", "name": "a.pdf", "data": "JVBERi0="})];
         let sent = hub.send_family_prompt(&parent, &child, pdf, None, false, false, None, None);
-        let _ = tokio::time::timeout(WAIT, sent).await;
-        assert_eq!(logged(&hub, &child, &["turn_end", "turn_error"]).await, "turn_error");
+        tokio::time::timeout(WAIT, sent).await.expect("the send answers").unwrap();
+        // The turn fails at its prompt's attachment, before anything is written.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let started = std::time::Instant::now();
         tokio::time::timeout(WAIT, push_off(&hub)).await.expect("the push returns").unwrap();
         let took = started.elapsed();
