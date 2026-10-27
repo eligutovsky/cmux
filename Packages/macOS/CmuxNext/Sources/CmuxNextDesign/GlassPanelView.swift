@@ -354,6 +354,7 @@ enum ActiveLookScope {
     /// Runs `body`, an update of `view`, in the scope of its glass's window (see ``glassWindow(of:)``).
     @available(macOS 26.0, *)
     nonisolated private static func scoped(_ view: NSView, _ body: () -> Void) {
+        if pthread_main_np() != 0 { MainActor.assumeIsolated { chainLog(view) } }
         guard pthread_main_np() != 0, MainActor.assumeIsolated({ enter(glassWindow(of: view)) }) else { return body() }
         body()
         MainActor.assumeIsolated { leave() }
@@ -414,6 +415,14 @@ enum ActiveLookScope {
 
     static var stats: [String: Int] = [:]
     static var outLogged = 0
+    static var chains: Set<String> = []
+    static func chainLog(_ view: NSView) {
+        var parts: [String] = []
+        var v: NSView? = view
+        while let cur = v { parts.append("\(NSStringFromClass(type(of: cur)).suffix(60))\((cur as? NSGlassEffectView).map { " [cv=\($0.contentView.map { NSStringFromClass(type(of: $0)) } ?? "nil")]" } ?? "")"); v = cur.superview }
+        let line = "win=\(view.window.map { String(describing: type(of: $0)) } ?? "nil") gw=\(glassWindow(of: view) != nil) " + parts.joined(separator: " < ")
+        if chains.insert(line).inserted { dlog("chain " + line) }
+    }
     static func dlog(_ line: String) {
         let url = URL(fileURLWithPath: "/tmp/cmux-glass-diag5.txt")
         let data = Data((line + "\n").utf8)
